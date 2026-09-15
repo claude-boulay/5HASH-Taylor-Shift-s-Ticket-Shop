@@ -1,0 +1,19 @@
+services:
+  floci:
+    image: floci/floci:latest
+    ports:
+      - "4566:4566"
+      # Le plan de données ELBv2 (ALB) écoute sur le port 80 DANS le
+      # conteneur floci, routé par en-tête Host. Sans cette ligne, l'ALB
+      # créé par Terraform répond aux appels API mais reste injoignable
+      # depuis ce poste : http://<nom-alb>.elb.localhost.floci.io ne
+      # marcherait qu'en curlant l'IP du conteneur floci directement.
+      - "80:80"
+    environment:
+      FLOCI_STORAGE_MODE: persistent
+      FLOCI_STORAGE_PERSISTENT_PATH: /app/data
+    volumes:
+      - ./floci-data:/app/data
+      # Floci lance un vrai conteneur Docker pour chaque instance EC2.
+      # Sans ce montage, aws_instance part en 'terminated'.
+      - /var/run/docker.sock:/var/run/docker.sock
