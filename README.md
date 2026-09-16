@@ -11,7 +11,7 @@ le développement et les tests.
 |---|---|
 | Infrastructure | Terraform (`hashicorp/aws` ~> 6.0), modules réutilisables |
 | Configuration | Ansible, inventaire dynamique (`cloud.terraform.terraform_provider`) |
-| Secrets | AWS Secrets Manager (infra), Ansible Vault (dépôt) |
+| Secrets | AWS Secrets Manager (infra), Ansible Vault (local, par personne) |
 | Application | [PrestaShop](https://hub.docker.com/r/prestashop/prestashop) (image officielle), Docker |
 | Base de données | RDS MySQL 8.0 |
 | Répartition de charge | Application Load Balancer |
@@ -34,7 +34,7 @@ Internet
             security group des instances applicatives
 
 Secrets Manager : identifiants DB (générés par Terraform)
-Ansible Vault   : identifiants admin PrestaShop (dans le dépôt, chiffrés)
+Ansible Vault   : identifiants admin PrestaShop (local, jamais versionné)
 ```
 
 **Placement des composants et pourquoi :**
@@ -126,29 +126,25 @@ ssh-keygen -t ed25519 -f .keys/taylor-shift -N ""
 
 ### 4. Le secret applicatif (Ansible Vault)
 
-`ansible/group_vars/all/vault.yml` est **chiffré, et versionné** — son
-contenu ne veut rien dire sans le mot de passe (`.vault-pass`, lui, ne
-part jamais dans le dépôt : `.gitignore`).
+`ansible/group_vars/all/vault.yml` n'est **ni versionné, ni partagé**
+(`.gitignore`) : chaque personne qui clone crée son propre coffre, avec
+son propre mot de passe. Ça évite qu'un seul mot de passe de coffre (et
+un seul fichier chiffré à tenir à jour) protège tout le monde.
 
-- **Si ce fichier existe déjà** dans votre clone : demandez le mot de
-  passe à un membre de l'équipe, il n'y a rien d'autre à faire.
-- **Si c'est la toute première fois** (ce fichier n'existe encore chez
-  personne) :
-  ```bash
-  mkdir -p ansible/group_vars/all
-  ansible-vault create ansible/group_vars/all/vault.yml
-  ```
-  Contenu à saisir :
-  ```yaml
-  ---
-  vault_admin_email: admin@taylor-shift.example
-  vault_admin_password: <votre mot de passe>
-  ```
-  Puis committez ce fichier (il est chiffré, sans risque) pour que le
-  reste de l'équipe le récupère au prochain `git pull`.
+```bash
+mkdir -p ansible/group_vars/all
+ansible-vault create ansible/group_vars/all/vault.yml
+```
+Contenu à saisir :
+```yaml
+---
+vault_admin_email: admin@taylor-shift.example
+vault_admin_password: <votre mot de passe>
+```
 
 **Notez le mot de passe du coffre quelque part** — il est redemandé à
-chaque commande Ansible (`--ask-vault-pass`), et personne ne peut le
+chaque commande Ansible (`--ask-vault-pass`), et lui non plus ne part
+jamais dans le dépôt (`.vault-pass`, `.gitignore`) : personne ne peut le
 retrouver à votre place.
 
 ### 5. Déployer l'infrastructure

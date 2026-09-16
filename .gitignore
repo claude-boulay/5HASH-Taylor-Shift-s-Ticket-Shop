@@ -1,7 +1,10 @@
 # Clé SSH : seule la publique serait sans risque, mais autant ne jamais y penser.
 .keys/
 
-# Mot de passe du coffre Ansible Vault.
+# Coffre Ansible Vault : chacun crée le sien en local (voir README), jamais
+# partagé ni versionné — évite qu'un seul mot de passe de coffre protège
+# tout le monde.
+ansible/group_vars/all/vault.yml
 .vault-pass
 
 # State Terraform et fichiers de travail.
