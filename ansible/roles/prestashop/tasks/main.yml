@@ -1,0 +1,39 @@
+---
+- name: Récupérer les identifiants de la base depuis Secrets Manager
+  ansible.builtin.set_fact:
+    db_credentials: "{{ lookup('amazon.aws.secretsmanager_secret', db_secret_name, region='us-east-1', endpoint_url='http://localhost.floci.io:4566', access_key='test', secret_key='test') | from_json }}"
+  no_log: true
+
+- name: Installer le SDK Python Docker
+  ansible.builtin.apt:
+    name: python3-docker
+    state: present
+
+- name: Créer le volume de données PrestaShop
+  community.docker.docker_volume:
+    name: "{{ prestashop_data_volume }}"
+
+- name: Démarrer PrestaShop
+  community.docker.docker_container:
+    name: "{{ prestashop_container_name }}"
+    image: "{{ prestashop_image }}"
+    state: started
+    restart_policy: unless-stopped
+    timeout: 600
+    ports:
+      - "{{ prestashop_http_port }}:80"
+    volumes:
+      - "{{ prestashop_data_volume }}:/var/www/html"
+    env:
+      DB_SERVER: "{{ db_container_ip }}"
+      DB_NAME: "{{ db_name }}"
+      DB_USER: "{{ db_credentials.username }}"
+      DB_PASSWD: "{{ db_credentials.password }}"
+      PS_INSTALL_AUTO: "1"
+      PS_DOMAIN: ""
+      ADMIN_MAIL: "{{ vault_admin_email }}"
+      ADMIN_PASSWD: "{{ vault_admin_password }}"
+      PS_FOLDER_INSTALL: install
+      PS_FOLDER_ADMIN: admin
+  no_log: true
+  notify: Vérifier que PrestaShop répond

@@ -1,0 +1,9 @@
+---
+- name: Vérifier que PrestaShop répond
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ prestashop_http_port }}/"
+    status_code: [200, 302]
+  retries: 40
+  delay: 10
+  register: _result
+  until: _result.status in [200, 302]

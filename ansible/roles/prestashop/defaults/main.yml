@@ -1,0 +1,2 @@
+prestashop_container_name: prestashop
+prestashop_data_volume: prestashop_data

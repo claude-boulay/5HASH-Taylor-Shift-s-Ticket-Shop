@@ -1,0 +1,43 @@
+---
+- name: Déployer Taylor Shift's Ticket Shop
+  hosts: webservers
+  gather_facts: false
+
+  pre_tasks:
+    - name: Vérifier ou installer Python 3
+      ansible.builtin.raw: test -x /usr/bin/python3 || (apt-get update && apt-get install -y python3)
+      changed_when: false
+
+    - name: Collecter les facts, maintenant que Python existe
+      ansible.builtin.setup:
+
+  roles:
+    - role: geerlingguy.docker
+      vars:
+        docker_daemon_options:
+          storage-driver: vfs
+    - prestashop
+
+  post_tasks:
+    - name: Déterminer l'adresse IP réelle de cette instance sur le réseau Floci
+      ansible.builtin.set_fact:
+        instance_real_ip: >-
+          {{ ansible_facts['all_ipv4_addresses']
+             | reject('match', '^127\.')
+             | reject('match', '^172\.17\.')
+             | reject('match', '^169\.254\.')
+             | first }}
+
+    - name: Enregistrer cette instance dans le groupe de cibles de l'ALB
+      ansible.builtin.command:
+        cmd: >-
+          aws --endpoint-url http:
+          elbv2 register-targets
+          --target-group-arn {{ alb_target_group_arn }}
+          --targets Id={{ instance_real_ip }}
+      delegate_to: localhost
+      environment:
+        AWS_ACCESS_KEY_ID: test
+        AWS_SECRET_ACCESS_KEY: test
+        AWS_DEFAULT_REGION: us-east-1
+      changed_when: false

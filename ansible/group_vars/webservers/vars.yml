@@ -1,0 +1,16 @@
+---
+ansible_host: 127.0.0.1
+ansible_port: >-
+  {{ lookup('ansible.builtin.pipe', 'docker port floci-ec2-' ~ floci_instance ~ ' 22/tcp')
+     | regex_search('[0-9]+$') }}
+
+db_container_name: >-
+  {{ lookup('ansible.builtin.pipe',
+     'docker ps --filter name=floci-rds-db-' ~
+     (db_resource_id | regex_replace('^db-', '')) ~
+     " | awk 'NR==2{print $NF}'") }}
+
+db_container_ip: >-
+  {{ lookup('ansible.builtin.pipe',
+     'docker inspect ' ~ db_container_name ~
+     " | grep IPAddress | grep -oE '[0-9.]+' | head -1") }}

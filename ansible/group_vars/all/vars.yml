@@ -1,0 +1,2 @@
+prestashop_image: "prestashop/prestashop:8-apache"
+prestashop_http_port: 80
