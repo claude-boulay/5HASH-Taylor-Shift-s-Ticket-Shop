@@ -71,6 +71,13 @@ provisionne.
   les visiteurs continuent d'être servis par l'autre instance. La panne
   n'est pas réparée automatiquement — il faut relancer `ansible-playbook`
   (ou `terraform apply` si l'instance elle-même a disparu).
+- **Limite de l'émulateur Floci** : son ALB relaie chaque requête vers la
+  cible en remplaçant le `Host` par `ip:port` de cette cible, au lieu de
+  préserver le nom de domaine du client comme le fait un vrai ALB AWS. Le
+  rôle `prestashop` compense en forçant ce `Host` côté Apache
+  (`mod_headers` + `RequestHeader set Host`, incident 22 de
+  `cmdlist.md`) — sans ce correctif, PrestaShop redirige indéfiniment
+  vers son propre domaine à chaque requête passée par l'ALB.
 
 ## Prérequis
 
@@ -80,7 +87,10 @@ provisionne.
 | Ansible (`ansible-core`) | 2.20.x |
 | AWS CLI | v2 |
 | Docker + Docker Compose | — |
-| Python (poste de contrôle) | avec `boto3`/`botocore` installés |
+
+Le CLI AWS n'est pas qu'un outil d'exploitation manuelle : le rôle
+`prestashop` (Part 7) l'appelle lui-même pour récupérer le mot de passe
+de la base dans Secrets Manager
 
 ## Démarrage, depuis un clone tout neuf
 
@@ -153,7 +163,6 @@ terraform -chdir=terraform apply
 ```bash
 ansible-galaxy collection install -r ansible/requirements.yml
 ansible-galaxy role install -r ansible/requirements.yml
-pip install boto3 botocore   # requis par le lookup Secrets Manager, sur ce poste
 ```
 
 ### 7. Configurer et déployer l'application

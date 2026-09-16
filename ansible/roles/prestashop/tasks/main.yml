@@ -1,7 +1,30 @@
 ---
 - name: Récupérer les identifiants de la base depuis Secrets Manager
+  # Le CLI aws, pas le lookup amazon.aws.secretsmanager_secret : ce
+  # dernier a besoin de boto3/botocore sur le poste de contrôle (comme
+  # tout module/lookup Python de la collection), une dépendance de plus
+  # à installer. Le CLI aws est déjà un prérequis du projet (Part 0),
+  # et c'est exactement l'outil déjà utilisé pour enregistrer les
+  # instances dans l'ALB (site.yml) — même principe qu'au Jour 4 : le
+  # nom du secret transite par l'inventaire, jamais sa valeur.
+  ansible.builtin.command:
+    cmd: >-
+      aws --endpoint-url http://localhost.floci.io:4566
+      secretsmanager get-secret-value
+      --secret-id {{ db_secret_name }}
+      --query SecretString --output text
+  delegate_to: localhost
+  environment:
+    AWS_ACCESS_KEY_ID: test
+    AWS_SECRET_ACCESS_KEY: test
+    AWS_DEFAULT_REGION: us-east-1
+  register: _prestashop_db_secret_raw
+  changed_when: false
+  no_log: true
+
+- name: Décoder le secret
   ansible.builtin.set_fact:
-    db_credentials: "{{ lookup('amazon.aws.secretsmanager_secret', db_secret_name, region='us-east-1', endpoint_url='http://localhost.floci.io:4566', access_key='test', secret_key='test') | from_json }}"
+    prestashop_db_credentials: "{{ _prestashop_db_secret_raw.stdout | from_json }}"
   no_log: true
 
 - name: Installer le SDK Python Docker
@@ -13,6 +36,26 @@
   community.docker.docker_volume:
     name: "{{ prestashop_data_volume }}"
 
+- name: Créer le dossier de configuration Apache additionnelle
+  ansible.builtin.file:
+    path: "{{ prestashop_apache_conf_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Activer mod_headers (nécessaire pour réécrire le Host)
+  ansible.builtin.copy:
+    src: headers.load
+    dest: "{{ prestashop_apache_conf_dir }}/headers.load"
+    mode: "0644"
+  notify: Recharger Apache
+
+- name: Forcer le Host vu par PrestaShop à celui de l'ALB
+  ansible.builtin.template:
+    src: alb-host-fix.conf.j2
+    dest: "{{ prestashop_apache_conf_dir }}/alb-host-fix.conf"
+    mode: "0644"
+  notify: Recharger Apache
+
 - name: Démarrer PrestaShop
   community.docker.docker_container:
     name: "{{ prestashop_container_name }}"
@@ -21,16 +64,18 @@
     restart_policy: unless-stopped
     timeout: 600
     ports:
-      - "{{ prestashop_http_port }}:80"
+      - "{{ instance_real_ip }}:{{ prestashop_http_port }}:80"
     volumes:
       - "{{ prestashop_data_volume }}:/var/www/html"
+      - "{{ prestashop_apache_conf_dir }}/headers.load:/etc/apache2/mods-enabled/headers.load:ro"
+      - "{{ prestashop_apache_conf_dir }}/alb-host-fix.conf:/etc/apache2/conf-enabled/zz-alb-host-fix.conf:ro"
     env:
       DB_SERVER: "{{ db_container_ip }}"
       DB_NAME: "{{ db_name }}"
-      DB_USER: "{{ db_credentials.username }}"
-      DB_PASSWD: "{{ db_credentials.password }}"
+      DB_USER: "{{ prestashop_db_credentials.username }}"
+      DB_PASSWD: "{{ prestashop_db_credentials.password }}"
       PS_INSTALL_AUTO: "1"
-      PS_DOMAIN: ""
+      PS_DOMAIN: "{{ alb_dns_name }}"
       ADMIN_MAIL: "{{ vault_admin_email }}"
       ADMIN_PASSWD: "{{ vault_admin_password }}"
       PS_FOLDER_INSTALL: install

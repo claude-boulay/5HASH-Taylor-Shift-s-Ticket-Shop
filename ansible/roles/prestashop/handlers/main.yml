@@ -1,9 +1,15 @@
 ---
+- name: Recharger Apache
+  community.docker.docker_container_exec:
+    container: "{{ prestashop_container_name }}"
+    command: apache2ctl graceful
+  failed_when: false
+
 - name: Vérifier que PrestaShop répond
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ prestashop_http_port }}/"
+    url: "http://{{ instance_real_ip }}:{{ prestashop_http_port }}/"
     status_code: [200, 302]
   retries: 40
   delay: 10
-  register: _result
-  until: _result.status in [200, 302]
+  register: _prestashop_result
+  until: _prestashop_result.status in [200, 302]

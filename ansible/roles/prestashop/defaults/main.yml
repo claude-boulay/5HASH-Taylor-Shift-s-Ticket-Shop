@@ -1,2 +1,3 @@
 prestashop_container_name: prestashop
 prestashop_data_volume: prestashop_data
+prestashop_apache_conf_dir: /opt/prestashop/apache-conf
