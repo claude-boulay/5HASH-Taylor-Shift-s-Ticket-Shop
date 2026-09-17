@@ -23,6 +23,7 @@ ansible/roles/geerlingguy.*
 # Données persistées par Floci (conteneurs EC2/RDS, state interne).
 floci-data/
 
-# Rien de tel qu'un secret en clair oublié dans un .env de travail.
 *.env
 !*.env.j2
+
+collections/*
