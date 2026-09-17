@@ -92,13 +92,29 @@ provisionne.
 | Outil | Version |
 |---|---|
 | Terraform | ≥ 1.11 |
-| Ansible (`ansible-core`) | 2.20.x |
+| Ansible (`ansible-core`) | 2.20.x — **précisément**, voir plus bas |
 | AWS CLI | v2 |
 | Docker + Docker Compose | — |
 
 Le CLI AWS n'est pas qu'un outil d'exploitation manuelle : le rôle
 `prestashop` (Part 7) l'appelle lui-même pour récupérer le mot de passe
-de la base dans Secrets Manager
+de la base dans Secrets Manager.
+
+**`ansible-core` 2.20.x précisément, pas juste "récent"** : la collection
+`cloud.terraform` (inventaire dynamique) appelle en interne une fonction
+dont un paramètre (`get_bin_path(..., required=True)`) a été retiré
+d'`ansible-core` à partir de la 2.21 — sur un `ansible-core` plus récent
+(fréquent sur une distribution "rolling release" comme Kali, qui
+embarque une version très à jour), l'inventaire plante immédiatement
+avec `get_bin_path() got an unexpected keyword argument 'required'`,
+avant même que le playbook ne démarre. Installez la version exacte dans
+un environnement virtuel plutôt que de vous fier à celle de votre
+distribution :
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
 ## Démarrage, depuis un clone tout neuf
 
@@ -112,6 +128,9 @@ cd 5HASH-Taylor-Shift-s-Ticket-Shop
 ```bash
 docker compose up -d
 ```
+> Si votre utilisateur n'est pas dans le groupe `docker`, toutes les
+> commandes `docker`/`docker compose` de ce guide (et celles que les
+> rôles Ansible exécutent à distance) doivent être précédées de `sudo`.
 
 ### 2. Mettre en place le backend Terraform
 
