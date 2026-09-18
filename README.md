@@ -1,11 +1,138 @@
 # Taylor Shift's Ticket Shop
 
-Infrastructure et configuration pour la boutique de billetterie de Taylor
-Shift : provisionnement avec Terraform, configuration et déploiement avec
-Ansible, hébergée sur [Floci](https://floci.io) (émulateur AWS local) pour
-le développement et les tests.
+Infrastructure et configuration pour la boutique de billetterie de Taylor Shift : provisionnement avec Terraform, configuration et déploiement avec Ansible, hébergée sur [Floci](https://floci.io) (émulateur AWS local) pour le développement et les tests.
 
-## Stack
+## Prérequis
+
+### Outils nécessaires
+
+| Outil | Version requise | Rôle |
+|-------|----------------|------|
+| **Terraform** | ≥ 1.11 | Provisionnement de l'infrastructure AWS (EC2, VPC, ALB, RDS, etc.) |
+| **Ansible Core** | 2.20.x (>=2.20, <2.21) | Configuration des serveurs et déploiement de l'application |
+| **AWS CLI** | v2 | Interaction avec les services AWS (utilisé aussi par les rôles Ansible) |
+| **Docker** | Latest | Conteneurisation de l'application PrestaShop |
+| **Docker Compose** | Latest | Orchestration du conteneur Floci (émulateur AWS local) |
+| **Python** | 3.8+ | Nécessaire pour Ansible et ses dépendances |
+| **Git** | Latest | Gestion de version du code |
+
+### À propos de Chocolatey (Windows uniquement)
+
+**Qu'est-ce que Chocolatey ?**
+
+Chocolatey est un gestionnaire de paquets pour Windows, similaire à `apt` sur Linux ou `brew` sur macOS. Il permet d'installer, mettre à jour et désinstaller des logiciels en ligne de commande, simplifiant grandement la gestion des outils de développement.
+
+**Vérifier si Chocolatey est installé :**
+
+```powershell
+choco --version
+```
+
+**Installer Chocolatey (si non installé) :**
+
+Ouvrez PowerShell **en tant qu'administrateur** et exécutez :
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+```
+
+Fermez et rouvrez PowerShell (toujours en administrateur) pour finaliser l'installation.
+
+**Lien officiel :** [https://chocolatey.org/install](https://chocolatey.org/install)
+
+> 💡 **Note** : Toutes les installations via Chocolatey mentionnées ci-dessous sont **optionnelles**. Une méthode d'installation manuelle est systématiquement proposée en alternative.
+
+### Installation des outils
+
+#### Terraform
+
+**Windows (PowerShell) :**
+```powershell
+# Option A : Via Chocolatey (gestionnaire de paquets Windows)
+# Nécessite Chocolatey installé (voir section ci-dessus)
+# Ouvrir PowerShell en administrateur puis :
+choco install terraform
+
+# Option B : Téléchargement manuel (recommandé si Chocolatey n'est pas installé)
+# 1. Télécharger depuis : https://www.terraform.io/downloads
+# 2. Extraire le .zip et ajouter terraform.exe au PATH Windows
+```
+
+**Linux (Debian/Ubuntu) :**
+```bash
+wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt update && sudo apt install terraform
+```
+
+**Lien officiel :** [https://www.terraform.io/downloads](https://www.terraform.io/downloads)
+
+#### Ansible Core
+
+**Important :** Ansible Core **doit être en version 2.20.x** (pas 2.21+) à cause d'une incompatibilité avec la collection `cloud.terraform` utilisée pour l'inventaire dynamique.
+
+**Windows & Linux (via pip - recommandé) :**
+```bash
+python3 -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+# Ou : .venv\Scripts\activate  # Windows PowerShell
+
+pip install -r requirements.txt  # Inclut ansible-core>=2.20,<2.21
+```
+
+**Lien officiel :** [https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html](https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html)
+
+#### AWS CLI
+
+**Windows (PowerShell) :**
+```powershell
+# Option A : Via installeur MSI (recommandé)
+# Télécharger et exécuter : https://awscli.amazonaws.com/AWSCLIV2.msi
+
+# Option B : Via Chocolatey (si déjà installé)
+# Ouvrir PowerShell en administrateur puis :
+choco install awscli
+```
+
+**Linux (Debian/Ubuntu) :**
+```bash
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+```
+
+**Lien officiel :** [https://aws.amazon.com/cli/](https://aws.amazon.com/cli/)
+
+#### Docker & Docker Compose
+
+**Windows :**
+- Docker Desktop : [https://www.docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop)
+
+**Linux (Debian/Ubuntu) :**
+```bash
+# Installation de Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+sudo usermod -aG docker $USER  # Ajouter l'utilisateur au groupe docker
+
+# Docker Compose est inclus dans les versions récentes de Docker
+```
+
+**Lien officiel :** [https://docs.docker.com/get-docker/](https://docs.docker.com/get-docker/)
+
+#### Git
+
+**Windows :**
+- [https://git-scm.com/download/win](https://git-scm.com/download/win)
+
+**Linux :**
+```bash
+sudo apt install git  # Debian/Ubuntu
+```
+
+**Lien officiel :** [https://git-scm.com/downloads](https://git-scm.com/downloads)
+
+## Stack technique
 
 | Domaine | Outils |
 |---|---|
@@ -19,124 +146,144 @@ le développement et les tests.
 
 ## Architecture
 
+### Vue d'ensemble
+
 ```
 Internet
    │
    ▼
-[ ALB — port 80 ]
-   │  répartit vers les cibles saines du groupe de cibles
+[ ALB — port 80 ]  ← Load Balancer avec health checks
+   │  Répartit vers les cibles saines du groupe de cibles
    ├──► [ app1 ]  EC2 + Docker : conteneur PrestaShop
    └──► [ app2 ]  EC2 + Docker : conteneur PrestaShop
                      │
                      ▼
-            [ RDS MySQL 8.0 ]
-            sous-réseaux privés, aucune entrée hors du
+            [ RDS MySQL 8.0 ]  ← Base de données managée
+            Sous-réseaux privés, aucune entrée hors du
             security group des instances applicatives
 
 Secrets Manager : identifiants DB (générés par Terraform)
 Ansible Vault   : identifiants admin PrestaShop (local, jamais versionné)
 ```
 
-**Placement des composants et pourquoi :**
-- **PrestaShop sur EC2**, en conteneur Docker installé par Ansible
-  (rôle `geerlingguy.docker` + rôle `prestashop`) : c'est la partie
-  applicative, sans état, qui doit pouvoir se répéter à l'identique sur
-  plusieurs instances.
-- **La base sur RDS**, un service managé, plutôt que sur EC2 : sauvegardes
-  automatiques, option Multi-AZ, et ça illustre le partage EC2/managé
-  demandé par le sujet.
-- **Réseau** : 2 sous-réseaux publics (ALB + instances, un par zone), 2
-  sous-réseaux privés (RDS uniquement, aucune route vers Internet). Le
-  security group de la base n'autorise que le security group applicatif.
+### Composants et justifications
 
-## Comment le trafic atteint l'application, et sa montée en charge
+**PrestaShop sur EC2 :**
+- Déployé en conteneur Docker via Ansible (rôle `geerlingguy.docker` + rôle custom `prestashop`)
+- Application stateless pouvant être répliquée sur plusieurs instances
+- Configuration uniforme grâce à Ansible
 
-Un visiteur atteint l'ALB (`app_url`, sortie Terraform), qui répartit les
-requêtes entre les instances **saines** de son groupe de cibles — un
-health check HTTP (`GET /`, toutes les 15s) retire automatiquement une
-instance en panne, sans intervention manuelle. **`var.instance_count`**
-(2 en dev/staging, 3 en prod) fixe combien d'instances Terraform
-provisionne.
+**Base de données sur RDS :**
+- Service managé AWS pour la base MySQL 8.0
+- Sauvegardes automatiques et option Multi-AZ (en production)
+- Illustre la répartition EC2/services managés demandée par le projet
 
-**Limites assumées :**
-- **Pas d'élasticité automatique.** Le nombre d'instances est fixé par une
-  variable, pas ajusté par la charge — un vrai Auto Scaling Group
-  demanderait que chaque machine se configure elle-même à l'arrivée
-  (`ansible-pull` ou image déjà prête), puisqu'ici Terraform doit connaître
-  chaque instance à l'avance pour nourrir l'inventaire Ansible.
-- **HTTP seul**, pas de TLS. Extension possible : `aws_acm_certificate` +
-  listener 443.
-- **Si une instance tombe** : l'ALB cesse de lui envoyer du trafic dès
-  l'échec du health check (jusqu'à ~45s, 3 échecs à 15s d'intervalle) ;
-  les visiteurs continuent d'être servis par l'autre instance. La panne
-  n'est pas réparée automatiquement — il faut relancer `ansible-playbook`
-  (ou `terraform apply` si l'instance elle-même a disparu).
-- **Limite de l'émulateur Floci** : son ALB relaie chaque requête vers la
-  cible en remplaçant le `Host` par `ip:port` de cette cible, au lieu de
-  préserver le nom de domaine du client comme le fait un vrai ALB AWS. Le
-  rôle `prestashop` compense en forçant ce `Host` côté Apache
-  (`mod_headers` + `RequestHeader set Host`, incident 22 de
-  `cmdlist.md`) — sans ce correctif, PrestaShop redirige indéfiniment
-  vers son propre domaine à chaque requête passée par l'ALB.
-- **Autre limite de Floci** : le conteneur `floci` doit être sur le même
-  réseau Docker que le VPC qu'il émule pour pouvoir router vers les IP
-  privées (`10.x.x.x`) des instances, mais ne rejoint pas ce réseau tout
-  seul — sans intervention, son ALB reste en `503` permanent même si
-  PrestaShop répond correctement. L'étape 6 du démarrage
-  (`docker network connect`) corrige ça une fois pour toutes ; voir
-  « Floci reste en 503 : il n'est pas sur le réseau du VPC » si vous
-  l'avez zappée ou après une recréation complète de `floci`.
+**Réseau :**
+- 2 sous-réseaux publics (ALB + instances EC2, un par zone de disponibilité)
+- 2 sous-réseaux privés (RDS uniquement, aucune route Internet)
+- Security groups : la base n'autorise que le trafic depuis les instances applicatives
 
-## Prérequis
+### Gestion du trafic et montée en charge
 
-| Outil | Version |
-|---|---|
-| Terraform | ≥ 1.11 |
-| Ansible (`ansible-core`) | 2.20.x — **précisément**, voir plus bas |
-| AWS CLI | v2 |
-| Docker + Docker Compose | — |
+**Flux de trafic :**
+1. Le visiteur accède à l'URL de l'ALB (`app_url` dans les outputs Terraform)
+2. L'ALB répartit les requêtes entre les instances **saines** via des health checks HTTP
+3. Health check : `GET /` toutes les 15 secondes
+4. Une instance défaillante est automatiquement retirée du pool sans intervention manuelle
 
-Le CLI AWS n'est pas qu'un outil d'exploitation manuelle : le rôle
-`prestashop` (Part 7) l'appelle lui-même pour récupérer le mot de passe
-de la base dans Secrets Manager.
+**Scalabilité :**
+- Le nombre d'instances est contrôlé par `var.instance_count` : 2 en dev/staging, 3 en production
+- Scalabilité manuelle : modification de la variable puis `terraform apply`
 
-**`ansible-core` 2.20.x précisément, pas juste "récent"** : la collection
-`cloud.terraform` (inventaire dynamique) appelle en interne une fonction
-dont un paramètre (`get_bin_path(..., required=True)`) a été retiré
-d'`ansible-core` à partir de la 2.21 — sur un `ansible-core` plus récent
-(fréquent sur une distribution "rolling release" comme Kali, qui
-embarque une version très à jour), l'inventaire plante immédiatement
-avec `get_bin_path() got an unexpected keyword argument 'required'`,
-avant même que le playbook ne démarre. Installez la version exacte dans
-un environnement virtuel plutôt que de vous fier à celle de votre
-distribution :
+**Limites et contraintes :**
+
+1. **Pas d'auto-scaling** : Le nombre d'instances est fixe, pas ajusté automatiquement selon la charge. Un véritable Auto Scaling Group nécessiterait que chaque instance se configure elle-même au démarrage (`ansible-pull` ou AMI préconfigurée).
+
+2. **HTTP uniquement** : Pas de TLS/HTTPS. Extension possible avec `aws_acm_certificate` + listener 443.
+
+3. **Haute disponibilité en cas de panne** :
+   - Si une instance tombe, l'ALB détecte l'échec en ~45 secondes (3 échecs × 15s)
+   - Le trafic est automatiquement redirigé vers les instances restantes
+   - La réparation nécessite une intervention manuelle : `ansible-playbook` ou `terraform apply`
+
+4. **Limites de l'émulateur Floci** :
+   - L'ALB de Floci remplace le header `Host` par `ip:port` au lieu de préserver le nom de domaine
+   - Le rôle Ansible `prestashop` compense avec `mod_headers` + `RequestHeader set Host`
+   - Floci doit être manuellement connecté au réseau Docker du VPC (voir étape 6 de l'installation)
+
+## Environnements
+
+Trois environnements séparés par variable `var.environment` et par state Terraform distinct :
+
+| Environnement | Instances | RDS Multi-AZ | Fichier de configuration |
+|---------------|-----------|--------------|--------------------------|
+| `dev` (défaut) | 2 | Non | `environments/dev.tfvars` |
+| `staging` | 2 | Non | `environments/staging.tfvars` |
+| `prod` | 3 | Oui, `db.t3.small` | `environments/prod.tfvars` |
+
+**Changer d'environnement :**
+
+Pour déployer `staging` :
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+terraform -chdir=terraform init -reconfigure \
+  -backend-config="key=staging/terraform.tfstate"
+terraform -chdir=terraform apply -var-file=environments/staging.tfvars
 ```
 
-## Démarrage, depuis un clone tout neuf
+Pour revenir à `dev` :
+```bash
+terraform -chdir=terraform init -reconfigure \
+  -backend-config="key=dev/terraform.tfstate"
+```
+
+## Installation et déploiement
+
+### Étape 1 : Cloner le projet
 
 ```bash
 git clone git@github.com:claude-boulay/5HASH-Taylor-Shift-s-Ticket-Shop.git
 cd 5HASH-Taylor-Shift-s-Ticket-Shop
 ```
 
-### 1. Lancer Floci
+### Étape 2 : Configurer l'environnement Python pour Ansible
+
+```bash
+# Créer un environnement virtuel
+python3 -m venv .venv
+
+# Activer l'environnement
+source .venv/bin/activate  # Linux/macOS
+# Ou : .venv\Scripts\activate  # Windows PowerShell
+
+# Installer les dépendances (inclut ansible-core>=2.20,<2.21)
+pip install -r requirements.txt
+```
+
+**Vérification :**
+```bash
+ansible --version
+# Doit afficher : ansible [core 2.20.x]
+```
+
+> ⚠️ **Important** : Si vous avez ansible-core 2.21+, l'inventaire dynamique échouera avec l'erreur `get_bin_path() got an unexpected keyword argument 'required'`. Utilisez impérativement un environnement virtuel avec la version 2.20.x.
+
+### Étape 3 : Lancer Floci (émulateur AWS local)
 
 ```bash
 docker compose up -d
 ```
-> Si votre utilisateur n'est pas dans le groupe `docker`, toutes les
-> commandes `docker`/`docker compose` de ce guide (et celles que les
-> rôles Ansible exécutent à distance) doivent être précédées de `sudo`.
 
-### 2. Mettre en place le backend Terraform
+**Vérification :**
+```bash
+docker compose ps
+# Le conteneur 'floci' doit être en état 'running'
+```
 
-Le bucket S3 qui reçoit le state n'existe pas encore — Terraform ne peut
-pas créer le bucket dont il a lui-même besoin pour démarrer. On le crée
-une fois, à la main :
+> 💡 **Note** : Si votre utilisateur n'est pas dans le groupe `docker`, préfixez les commandes Docker avec `sudo`.
+
+### Étape 4 : Créer le bucket S3 pour le state Terraform
+
+Le bucket S3 qui stocke le state Terraform doit être créé manuellement (bootstrap) :
 
 ```bash
 export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1
@@ -144,222 +291,356 @@ aws --endpoint-url http://localhost.floci.io:4566 s3api create-bucket \
   --bucket taylor-shift-tfstate
 ```
 
-### 3. Générer la clé SSH du projet
+**Vérification :**
+```bash
+aws --endpoint-url http://localhost.floci.io:4566 s3 ls
+# Doit afficher : taylor-shift-tfstate
+```
+
+### Étape 5 : Générer la clé SSH du projet
+
+Cette clé SSH sera utilisée par Ansible pour se connecter aux instances EC2 :
 
 ```bash
 mkdir -p .keys
 ssh-keygen -t ed25519 -f .keys/taylor-shift -N ""
 ```
 
-### 4. Le secret applicatif (Ansible Vault)
+**Vérification :**
+```bash
+ls -l .keys/
+# Doit afficher : taylor-shift et taylor-shift.pub
+```
 
-`ansible/group_vars/all/vault.yml` n'est **ni versionné, ni partagé**
-(`.gitignore`) : chaque personne qui clone crée son propre coffre, avec
-son propre mot de passe. Ça évite qu'un seul mot de passe de coffre (et
-un seul fichier chiffré à tenir à jour) protège tout le monde.
+### Étape 6 : Créer le coffre Ansible Vault pour les secrets applicatifs
+
+Le fichier `ansible/group_vars/all/vault.yml` contient les identifiants admin PrestaShop. Il est **chiffré** et **non versionné** (chaque développeur a le sien).
 
 ```bash
 mkdir -p ansible/group_vars/all
 ansible-vault create ansible/group_vars/all/vault.yml
 ```
-Contenu à saisir :
+
+Lorsque l'éditeur s'ouvre, saisissez :
 ```yaml
 ---
 vault_admin_email: admin@taylor-shift.example
-vault_admin_password: <votre mot de passe>
+vault_admin_password: VotreMotDePasseSecurise123!
 ```
 
-**Notez le mot de passe du coffre quelque part** — il est redemandé à
-chaque commande Ansible (`--ask-vault-pass`), et lui non plus ne part
-jamais dans le dépôt (`.vault-pass`, `.gitignore`) : personne ne peut le
-retrouver à votre place.
+Sauvegardez et quittez. **Notez le mot de passe du coffre** : il sera redemandé à chaque commande Ansible.
 
-### 5. Déployer l'infrastructure
+**Vérification :**
+```bash
+ansible-vault view ansible/group_vars/all/vault.yml
+# Entrez le mot de passe du coffre : doit afficher le contenu déchiffré
+```
+
+### Étape 7 : Initialiser et déployer l'infrastructure avec Terraform
 
 ```bash
+# Initialiser Terraform
 terraform -chdir=terraform init
+
+# Déployer l'infrastructure
 terraform -chdir=terraform apply
+# Tapez 'yes' quand demandé
 ```
 
-### 6. Rattacher Floci au réseau du VPC qu'il vient de créer
+**Vérification :**
+```bash
+terraform -chdir=terraform output
+# Doit afficher les outputs : app_url, instance_ids, db_endpoint, etc.
+```
 
-`terraform apply` fait créer par Floci le réseau Docker qui émule le VPC
-(`floci-vpc-...`) et y attache les instances EC2 — mais Floci n'y attache
-pas son propre conteneur. Sans cette étape, son ALB ne peut pas router
-vers les IP privées (`10.x.x.x`) des cibles : health checks en échec,
-`503` permanent (voir « Limites assumées » ci-dessus). À faire une seule
-fois, juste après le premier `apply` qui crée le VPC :
+### Étape 8 : Connecter Floci au réseau Docker du VPC
+
+Cette étape critique permet à l'ALB de Floci de router vers les IP privées des instances EC2.
 
 ```bash
 docker network connect $(docker network ls --filter name=floci-vpc --format '{{.Name}}') \
   $(docker compose ps -q floci)
 ```
-Fait à ce stade (avant que l'ALB commence ses health checks), **aucun
-redémarrage de Floci n'est nécessaire** — donc les instances EC2 ne
-risquent pas d'être tuées au passage. Voir « Floci reste en 503 » plus
-bas si vous l'avez zappée ou si vous recréez `floci` entièrement.
 
-### 7. Installer les dépendances Ansible
-
-```bash
-ansible-galaxy collection install -r ansible/requirements.yml
-ansible-galaxy role install -r ansible/requirements.yml
-```
-
-### 8. Configurer et déployer l'application
-
-```bash
-ansible-inventory -i ansible/inventory.yml --graph   # vérification
-ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
-```
-Relancez la même commande une seconde fois : elle doit annoncer
-`changed=0` partout (idempotence).
-
-### 9. Vérifier
-
-```bash
-terraform -chdir=terraform output app_url
-curl -I $(terraform -chdir=terraform output -raw app_url)
-```
-**Résultat attendu :** `200` ou `302`.
-
-## Environnements
-
-Trois environnements partagent le même code, séparés par variable
-(`var.environment`) et par **state Terraform** (jamais par un simple
-`-var`, sinon Terraform remplacerait un environnement par l'autre) :
-
-| Environnement | Instances | RDS Multi-AZ | Fichier |
-|---|---|---|---|
-| `dev` (par défaut) | 2 | non | `environments/dev.tfvars` |
-| `staging` | 2 | non | `environments/staging.tfvars` |
-| `prod` | 3 | oui, `db.t3.small` | `environments/prod.tfvars` |
-
-Déployer un environnement autre que `dev` :
-```bash
-terraform -chdir=terraform init -reconfigure \
-  -backend-config="key=staging/terraform.tfstate"
-terraform -chdir=terraform apply -var-file=environments/staging.tfvars
-```
-Pour revenir à `dev` :
-```bash
-terraform -chdir=terraform init -reconfigure \
-  -backend-config="key=dev/terraform.tfstate"
-```
-
-## Détruire l'infrastructure
-
-```bash
-terraform -chdir=terraform destroy
-aws --endpoint-url http://localhost.floci.io:4566 s3 rm s3://taylor-shift-tfstate --recursive
-aws --endpoint-url http://localhost.floci.io:4566 s3api delete-bucket --bucket taylor-shift-tfstate
-docker compose down
-```
-
-Pour la reconstruire ensuite, repartez de l'étape 2 (le bucket a été
-supprimé) — les étapes 3 et 4 (clé SSH, coffre Vault) n'ont besoin d'être
-refaites que si vous avez aussi supprimé `.keys/` et le coffre.
-
-## Floci reste en 503 : il n'est pas sur le réseau du VPC
-
-**Symptôme :** `curl -I $(terraform -chdir=terraform output -raw app_url)`
-renvoie `503 Service Unavailable` en boucle (ou un timeout pur et simple
-si ça traîne depuis un moment), alors que PrestaShop répond bien en
-direct sur chaque instance :
-```bash
-aws --endpoint-url http://localhost.floci.io:4566 elbv2 describe-target-health \
-  --target-group-arn <arn du groupe de cibles>
-```
-montre les cibles `unhealthy` (`Target.Timeout` ou
-`Target.FailedHealthChecks`).
-
-### Connaître l'arn du groupe de cibles 
-```bash
-aws --endpoint-url http://localhost.floci.io:4566 \
-  elbv2 describe-target-groups \
-  --names taylor-shift-dev-tg \
-  --query 'TargetGroups[0].TargetGroupArn' \
-  --output text
-```
-
-**Cause :** `floci` crée lui-même le réseau Docker qui émule le VPC
-(`floci-vpc-...`) et y attache les instances EC2, mais ne s'y attache pas
-toujours lui-même à la création de la stack. Sans cette interface, son
-ALB ne peut structurellement pas router vers les IP privées (`10.x.x.x`)
-des cibles enregistrées — le health check échoue indéfiniment, quel que
-soit l'état réel de PrestaShop.
-
-**Vérifier :**
+**Vérification :**
 ```bash
 docker inspect $(docker compose ps -q floci) \
   --format '{{range $net, $_ := .NetworkSettings.Networks}}{{$net}}{{"\n"}}{{end}}'
+# Doit afficher : le réseau du projet ET un réseau floci-vpc-...
 ```
-S'il n'affiche que le réseau du projet (`..._default`) et aucun réseau
-`floci-vpc-...`, c'est ça.
 
-**Corriger :**
+> ⚠️ **Important** : Sans cette étape, l'ALB restera en erreur 503 permanent.
+
+### Étape 9 : Installer les dépendances Ansible (rôles et collections)
+
 ```bash
+# Collections (dont cloud.terraform pour l'inventaire dynamique)
+ansible-galaxy collection install -r ansible/requirements.yml
+
+# Rôles (dont geerlingguy.docker)
+ansible-galaxy role install -r ansible/requirements.yml
+```
+
+**Vérification de l'inventaire dynamique :**
+```bash
+ansible-inventory -i ansible/inventory.yml --graph
+# Doit afficher la structure : @all > @ungrouped, @application > app1, app2
+```
+
+### Étape 10 : Configurer et déployer l'application avec Ansible
+
+```bash
+ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
+# Entrez le mot de passe du coffre Ansible Vault
+```
+
+**Test d'idempotence :** Relancez la même commande une seconde fois :
+```bash
+ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
+# Résultat attendu : changed=0 partout (aucun changement appliqué)
+```
+
+### Étape 11 : Vérifier l'accès à l'application
+
+```bash
+# Récupérer l'URL de l'application
+terraform -chdir=terraform output app_url
+
+# Tester l'accès HTTP
+curl -I $(terraform -chdir=terraform output -raw app_url)
+```
+
+**Résultat attendu :**
+- Code HTTP `200 OK` ou `302 Found` (redirection PrestaShop normale)
+- L'URL doit être accessible dans un navigateur web
+
+**Accès à l'interface d'administration :**
+- URL : `http://<app_url>/admin-dev`
+- Email : celui configuré dans `vault.yml`
+- Mot de passe : celui configuré dans `vault.yml`
+
+## Problèmes courants et résolutions
+
+### 1. Erreur `get_bin_path() got an unexpected keyword argument 'required'`
+
+**Symptôme :**
+```
+ERROR! couldn't resolve module/action 'cloud.terraform.terraform_provider'
+...
+get_bin_path() got an unexpected keyword argument 'required'
+```
+
+**Cause :** Ansible Core version 2.21 ou supérieure installée. La collection `cloud.terraform` est incompatible avec cette version.
+
+**Solution :**
+```bash
+# Créer un environnement virtuel avec la bonne version
+python3 -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+# Ou : .venv\Scripts\activate  # Windows
+
+pip install 'ansible-core>=2.20,<2.21'
+pip install -r requirements.txt
+```
+
+### 2. ALB en erreur 503 permanent (Service Unavailable)
+
+**Symptôme :**
+```bash
+curl -I $(terraform -chdir=terraform output -raw app_url)
+# Retourne : HTTP/1.1 503 Service Unavailable
+```
+
+**Diagnostic :**
+```bash
+# Vérifier l'état des cibles dans le groupe de cibles
+aws --endpoint-url http://localhost.floci.io:4566 elbv2 describe-target-health \
+  --target-group-arn <arn_du_target_group>
+# Affiche : "State": "unhealthy", "Reason": "Target.FailedHealthChecks"
+```
+
+**Cause :** Le conteneur Floci n'est pas connecté au réseau Docker du VPC. L'ALB ne peut pas router vers les IP privées des instances.
+
+**Solution :**
+```bash
+# Connecter Floci au réseau du VPC
 docker network connect $(docker network ls --filter name=floci-vpc --format '{{.Name}}') \
   $(docker compose ps -q floci)
+
+# Redémarrer Floci pour relancer l'ALB
 docker compose restart floci
+
+# Attendre 30-60 secondes que les health checks passent
+curl -I $(terraform -chdir=terraform output -raw app_url)
 ```
-Le redémarrage de `floci` est nécessaire pour relever son ALB : le
-listener finit par planter à force de health checks vers des cibles
-injoignables. **Attention**, ce redémarrage arrête aussi les conteneurs
-qui simulent les instances EC2 sans les reprovisionner (sshd et le
-Docker imbriqué ne repartent pas tout seuls) — enchaînez directement
-avec la procédure « Redémarrer les instances après un arrêt de Floci »
-ci-dessous, jusqu'à la recréation via `terraform apply -replace` si
-`service ssh start` / `service docker start` ne suffisent pas. Pensez
-aussi à retirer du groupe de cibles les anciennes IP devenues fantômes
-(`elbv2 deregister-targets`) si vous recréez les instances au lieu de
-les redémarrer.
 
-Cette connexion réseau **n'est pas persistée** : elle ne tient que tant
-que le conteneur `floci` existe. Si vous le recréez entièrement
-(`docker compose down` puis `up`, pas un simple `restart`), il faudra la
-refaire.
+**Si le problème persiste après redémarrage de Floci :**
+Les instances EC2 doivent être redémarrées manuellement (voir section 3).
 
-## Redémarrer les instances après un arrêt de Floci
+### 3. Instances EC2 inaccessibles après redémarrage de Floci/Docker
 
-Floci tourne dans Docker : un redémarrage de Docker Desktop/WSL (pas une
-suppression Terraform) arrête ses conteneurs, y compris ceux qui simulent
-les instances EC2 — mais **ne relance ni leurs services ni leur SSH**
-automatiquement (`docker start` ne fait que relancer le process principal
-du conteneur, pas le bootstrap que Floci exécute à la création).
-
+**Symptôme :**
 ```bash
-docker compose up -d   # relance Floci lui-même
-
-# pour chaque instance arrêtée :
-docker start floci-ec2-<instance-id>
-docker exec floci-ec2-<instance-id> service ssh start
-docker exec floci-ec2-<instance-id> service docker start
+ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
+# Erreur : "Failed to connect to the host via ssh"
 ```
-Les identifiants d'instance (`i-...`) sont dans la sortie `instance_ids`
-de `terraform output`. Le Docker imbriqué (celui qui fait tourner
-PrestaShop *dans* l'instance) ne redémarre pas non plus tout seul — sans
-`service docker start`, `ansible-playbook` échouera en essayant de
-joindre son SDK Python Docker. Une fois SSH et Docker de retour, un
-simple `ansible-playbook ... --ask-vault-pass` remet le reste en ordre :
-grâce à `restart_policy: unless-stopped`, le dockerd qui redémarre relance
-lui-même le conteneur PrestaShop, Ansible le retrouve déjà démarré et ne
-change rien.
 
-Si malgré ça les instances ne redeviennent pas joignables en SSH (ça
-arrive, notamment après le redémarrage forcé de `floci` décrit
-ci-dessus), le plus simple est de les recréer plutôt que de s'acharner :
+**Cause :** Le redémarrage de Docker Desktop/WSL ou du conteneur Floci arrête les conteneurs qui simulent les EC2, mais ne relance pas leurs services (SSH, Docker interne).
+
+**Solution 1 - Redémarrage manuel des services :**
 ```bash
-terraform -chdir=terraform apply \
-  -replace='module.compute.aws_instance.app["app1"]' \
-  -replace='module.compute.aws_instance.app["app2"]'
+# Relancer Floci
+docker compose up -d
+
+# Pour chaque instance (remplacer i-xxxxx par l'ID réel)
+docker start floci-ec2-i-xxxxx
+docker exec floci-ec2-i-xxxxx service ssh start
+docker exec floci-ec2-i-xxxxx service docker start
+
+# Vérifier que PrestaShop est redémarré
 ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
 ```
 
-## Pour aller plus loin
+**Solution 2 - Recréation des instances (plus rapide) :**
+```bash
+# Recréer toutes les instances
+terraform -chdir=terraform apply \
+  -replace='module.compute.aws_instance.app["app1"]' \
+  -replace='module.compute.aws_instance.app["app2"]'
 
-Le détail complet de la construction de ce projet — chaque fichier, dans
-l'ordre, avec le contenu à y mettre — vit dans
-[`cmdlist.md`](cmdlist.md), ainsi qu'un journal des incidents
-rencontrés pendant la construction (diagnostic et correction de chacun),
-utile en cas de nouvelle panne du même genre.
+# Redéployer l'application
+ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
+```
+
+### 4. Permission denied sur les commandes Docker
+
+**Symptôme :**
+```bash
+docker compose up -d
+# Erreur : "permission denied while trying to connect to the Docker daemon socket"
+```
+
+**Cause :** L'utilisateur actuel n'est pas dans le groupe `docker`.
+
+**Solution (Linux) :**
+```bash
+# Ajouter l'utilisateur au groupe docker
+sudo usermod -aG docker $USER
+
+# Se déconnecter/reconnecter ou :
+newgrp docker
+
+# Vérifier
+docker ps
+```
+
+**Solution (Windows/WSL) :**
+Vérifier que Docker Desktop est lancé et configuré pour WSL 2.
+
+### 5. Erreur "bucket does not exist" lors du terraform init
+
+**Symptôme :**
+```bash
+terraform -chdir=terraform init
+# Erreur : "Failed to get existing workspaces: S3 bucket does not exist"
+```
+
+**Cause :** Le bucket S3 de backend n'a pas été créé (étape 4 manquante).
+
+**Solution :**
+```bash
+export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-east-1
+aws --endpoint-url http://localhost.floci.io:4566 s3api create-bucket \
+  --bucket taylor-shift-tfstate
+
+# Réessayer
+terraform -chdir=terraform init
+```
+
+### 6. Ansible Vault : "Decryption failed"
+
+**Symptôme :**
+```bash
+ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass
+# Erreur : "Decryption failed (no vault secrets were found that could decrypt)"
+```
+
+**Cause :** Mot de passe du coffre Ansible Vault incorrect.
+
+**Solution :**
+- Vérifier le mot de passe noté lors de l'étape 6
+- Si perdu, recréer le coffre :
+```bash
+rm ansible/group_vars/all/vault.yml
+ansible-vault create ansible/group_vars/all/vault.yml
+# Saisir à nouveau : vault_admin_email et vault_admin_password
+```
+
+### 7. PrestaShop affiche une erreur de connexion à la base de données
+
+**Symptôme :** Page blanche ou erreur "Database connection error" lors de l'accès à l'application.
+
+**Diagnostic :**
+```bash
+# Vérifier que RDS est accessible
+terraform -chdir=terraform output db_endpoint
+
+# Tester depuis une instance
+ansible app -i ansible/inventory.yml -m shell \
+  -a "mysql -h <db_endpoint> -u admin -p<password> -e 'SHOW DATABASES;'" \
+  --ask-vault-pass
+```
+
+**Solutions possibles :**
+- Vérifier que les security groups autorisent le trafic 3306 entre instances et RDS
+- Vérifier que le mot de passe de base de données dans Secrets Manager est correct
+- Redéployer avec Ansible : `ansible-playbook -i ansible/inventory.yml ansible/site.yml --ask-vault-pass`
+
+### 8. "No hosts matched" lors de ansible-playbook
+
+**Symptôme :**
+```bash
+ansible-inventory -i ansible/inventory.yml --graph
+# Affiche uniquement : @all | @ungrouped
+```
+
+**Cause :** L'inventaire dynamique ne trouve pas les instances Terraform.
+
+**Diagnostic :**
+```bash
+# Vérifier que l'infrastructure existe
+terraform -chdir=terraform output instance_ids
+
+# Vérifier le state Terraform
+ls -la terraform/terraform.tfstate
+```
+
+**Solution :**
+- Si pas d'infrastructure : `terraform -chdir=terraform apply`
+- Si l'inventaire ne se rafraîchit pas : vérifier `ansible/inventory.yml` et que `cloud.terraform` est installé
+
+## Détruire l'infrastructure
+
+Pour supprimer complètement l'infrastructure et repartir de zéro :
+
+```bash
+# Détruire les ressources AWS
+terraform -chdir=terraform destroy
+# Confirmer avec 'yes'
+
+# Supprimer le bucket S3 de state
+aws --endpoint-url http://localhost.floci.io:4566 s3 rm \
+  s3://taylor-shift-tfstate --recursive
+aws --endpoint-url http://localhost.floci.io:4566 s3api delete-bucket \
+  --bucket taylor-shift-tfstate
+
+# Arrêter et supprimer Floci
+docker compose down
+
+# (Optionnel) Supprimer les réseaux Docker orphelins
+docker network prune -f
+```
+
+**Pour redéployer après destruction :**
+1. Reprendre à partir de l'étape 3 (Lancer Floci)
+2. Les étapes 2 (Python venv), 5 (clé SSH) et 6 (Ansible Vault) ne sont à refaire que si vous avez aussi supprimé `.venv/`, `.keys/` et le fichier vault
