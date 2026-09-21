@@ -23,8 +23,6 @@ resource "ansible_group" "webservers" {
     prestashop_title = "Taylor Shift's Ticket Shop"
 
     alb_target_group_arn = module.compute.target_group_arn
-
-    
-    alb_dns_name = module.compute.alb_dns_name
+    alb_dns_name         = module.compute.alb_dns_name
   }
 }
