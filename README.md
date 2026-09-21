@@ -644,3 +644,27 @@ docker network prune -f
 **Pour redéployer après destruction :**
 1. Reprendre à partir de l'étape 3 (Lancer Floci)
 2. Les étapes 2 (Python venv), 5 (clé SSH) et 6 (Ansible Vault) ne sont à refaire que si vous avez aussi supprimé `.venv/`, `.keys/` et le fichier vault
+
+## Intégration continue
+
+`.github/workflows/deploy-test.yml` rejoue le déploiement complet à chaque
+push/PR sur `main` (et manuellement via l'onglet Actions) :
+- **`validate`** : `terraform fmt -check`, `terraform validate`,
+  `ansible-lint` — rapide, échoue vite sur une erreur de syntaxe.
+- **`deploy`** : démarre Floci, déploie réellement l'infrastructure et
+  l'application (comme les étapes 1 à 9 ci-dessus), **relance
+  `ansible-playbook` une seconde fois et échoue si `changed` n'est pas à
+  `0` partout** (idempotence non respectée), vérifie que l'URL de l'ALB
+  répond en `200`/`302`, puis détruit tout.
+
+**Nécessite un secret de dépôt** (Settings → Secrets and variables →
+Actions → New repository secret) :
+- `ANSIBLE_VAULT_PASSWORD` — n'importe quel mot de passe ; la CI crée son
+  propre coffre jetable à chaque exécution (identifiants admin aléatoires,
+  seulement valables le temps du run, jamais les vôtres) et n'a besoin de
+  ce mot de passe que pour le chiffrer/déchiffrer.
+
+Le poste Floci/Docker-dans-Docker étant sensible à la machine qui l'exécute
+(voir l'annexe incidents de `cmdlist.md`), un premier run sur GitHub
+Actions peut très bien révéler un problème qui n'apparaît sur aucune
+machine de l'équipe — c'est justement le but.

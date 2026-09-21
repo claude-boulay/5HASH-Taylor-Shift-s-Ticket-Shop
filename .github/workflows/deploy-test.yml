@@ -1,0 +1,165 @@
+name: Test de déploiement
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  AWS_DEFAULT_REGION: us-east-1
+
+jobs:
+  validate:
+    name: Validation statique
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~> 1.11"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installer ansible-core (version figée, voir requirements.txt)
+        run: pip install -r requirements.txt
+
+      - name: Installer les collections et rôles Ansible
+        run: |
+          ansible-galaxy collection install -r ansible/requirements.yml
+          ansible-galaxy role install -r ansible/requirements.yml
+
+      - name: terraform fmt -check
+        run: terraform -chdir=terraform fmt -check -recursive
+
+      - name: terraform validate
+        run: |
+          terraform -chdir=terraform init -backend=false
+          terraform -chdir=terraform validate
+
+      - name: ansible-lint
+        run: |
+          pip install ansible-lint
+          ansible-lint ansible/roles/prestashop
+
+  deploy:
+    name: Déploiement complet sur Floci
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~> 1.11"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installer ansible-core (version figée, voir requirements.txt)
+        run: pip install -r requirements.txt
+
+      - name: Installer les collections et rôles Ansible
+        run: |
+          ansible-galaxy collection install -r ansible/requirements.yml
+          ansible-galaxy role install -r ansible/requirements.yml
+
+      - name: Démarrer Floci
+        run: |
+          docker compose up -d
+          timeout 60 bash -c '
+            until [ "$(docker inspect -f "{{.State.Health.Status}}" "$(docker compose ps -q floci)" 2>/dev/null)" = "healthy" ]; do
+              sleep 2
+            done
+          '
+
+      - name: Générer la clé SSH du projet
+        run: |
+          mkdir -p .keys
+          ssh-keygen -t ed25519 -f .keys/taylor-shift -N ""
+
+      - name: Créer le bucket S3 pour le state Terraform
+        run: |
+          aws --endpoint-url http://localhost.floci.io:4566 s3api create-bucket \
+            --bucket taylor-shift-tfstate
+
+      - name: Créer un coffre Ansible Vault jetable, pour cette exécution seulement
+        env:
+          VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+        run: |
+          if [ -z "$VAULT_PASSWORD" ]; then
+            echo "::error::Le secret ANSIBLE_VAULT_PASSWORD n'est pas configuré (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          mkdir -p ansible/group_vars/all
+          echo -n "$VAULT_PASSWORD" > .vault-pass
+          cat > /tmp/vault-plain.yml <<EOF
+          ---
+          vault_admin_email: ci@taylor-shift.example
+          vault_admin_password: $(openssl rand -base64 24)
+          EOF
+          ansible-vault encrypt /tmp/vault-plain.yml \
+            --vault-password-file .vault-pass \
+            --output ansible/group_vars/all/vault.yml
+
+      - name: terraform apply
+        run: |
+          terraform -chdir=terraform init
+          terraform -chdir=terraform apply -auto-approve
+
+      - name: Rattacher Floci au réseau du VPC, si Floci l'a créé séparément
+        run: |
+          NET=$(docker network ls --filter name=floci-vpc --format '{{.Name}}' | head -1)
+          if [ -n "$NET" ]; then
+            echo "Réseau VPC séparé détecté ($NET), rattachement de floci..."
+            docker network connect "$NET" "$(docker compose ps -q floci)" || true
+          else
+            echo "Pas de réseau floci-vpc séparé sur ce runner, rien à faire."
+          fi
+
+      - name: Déployer avec Ansible (1er passage)
+        run: |
+          ansible-playbook -i ansible/inventory.yml ansible/site.yml \
+            --vault-password-file .vault-pass
+
+      - name: Vérifier l'idempotence (2e passage, doit annoncer changed=0)
+        run: |
+          set -o pipefail
+          ansible-playbook -i ansible/inventory.yml ansible/site.yml \
+            --vault-password-file .vault-pass | tee /tmp/second-run.log
+          if grep -qE "changed=[1-9]" /tmp/second-run.log; then
+            echo "::error::Second passage non idempotent (changed > 0 quelque part)"
+            exit 1
+          fi
+
+      - name: Vérifier que l'application répond
+        run: |
+          APP_URL=$(terraform -chdir=terraform output -raw app_url)
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$APP_URL" || echo 000)
+            if [ "$code" = "200" ] || [ "$code" = "302" ]; then
+              echo "OK: $APP_URL a répondu $code"
+              exit 0
+            fi
+            echo "Tentative $i/20 : $code, nouvel essai dans 15s"
+            sleep 15
+          done
+          echo "::error::$APP_URL ne répond pas correctement (200/302 attendu)"
+          exit 1
+
+      - name: Détruire l'infrastructure
+        if: always()
+        run: |
+          terraform -chdir=terraform destroy -auto-approve || true
+          aws --endpoint-url http://localhost.floci.io:4566 s3 rm \
+            s3://taylor-shift-tfstate --recursive || true
+          docker compose down -v || true
