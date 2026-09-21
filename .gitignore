@@ -25,5 +25,5 @@ floci-data/
 
 *.env
 !*.env.j2
-
+# Donéees importer par les requirements ansible-galaxy
 collections/*
